@@ -6,6 +6,7 @@ const { prefix: PREFIX } = require("../../uswds-core/src/js/config");
 const { CLICK } = require("../../uswds-core/src/js/events");
 
 const COMBO_BOX_CLASS = `${PREFIX}-combo-box`;
+const COMBO_BOX_LIST_OPEN_CLASS = `${COMBO_BOX_CLASS}--list-open`;
 const COMBO_BOX_PRISTINE_CLASS = `${COMBO_BOX_CLASS}--pristine`;
 const SELECT_CLASS = `${COMBO_BOX_CLASS}__select`;
 const INPUT_CLASS = `${COMBO_BOX_CLASS}__input`;
@@ -32,6 +33,11 @@ const LIST_OPTION_SELECTED = `.${LIST_OPTION_SELECTED_CLASS}`;
 const STATUS = `.${STATUS_CLASS}`;
 
 const DEFAULT_FILTER = ".*{{query}}.*";
+
+let ARROW_KEYS_DISABLED = true;
+let LAST_CURSOR_POSITION = 0;
+
+const META_KEYS = ["Escape","Shift","Meta","Alt","Control","CapsLock","Tab","ArrowLeft","ArrowUp","ArrowRight","ArrowDown"];
 
 const noop = () => {};
 
@@ -208,7 +214,7 @@ const enhanceComboBox = (_comboBoxEl) => {
   selectEl.setAttribute("aria-hidden", "true");
   selectEl.setAttribute("tabindex", "-1");
   selectEl.classList.add("usa-sr-only", SELECT_CLASS);
-  selectEl.id = "";
+  selectEl.id = selectId + "__select";
   selectEl.value = "";
 
   ["required", "aria-label", "aria-labelledby"].forEach((name) => {
@@ -222,7 +228,7 @@ const enhanceComboBox = (_comboBoxEl) => {
   // sanitize doesn't like functions in template literals
   const input = document.createElement("input");
   input.setAttribute("id", selectId);
-  input.setAttribute("aria-owns", listId);
+  // input.setAttribute("aria-owns", listId);
   input.setAttribute("aria-controls", listId);
   input.setAttribute("aria-autocomplete", "list");
   input.setAttribute("aria-expanded", "false");
@@ -270,15 +276,16 @@ const enhanceComboBox = (_comboBoxEl) => {
 
   if (selectEl.disabled) {
     disable(comboBoxEl);
-    selectEl.disabled = false;
+    // selectEl.disabled = false;
   }
 
   if (selectEl.hasAttribute("aria-disabled")) {
     ariaDisable(comboBoxEl);
-    selectEl.removeAttribute("aria-disabled");
+    // selectEl.removeAttribute("aria-disabled");
   }
 
   comboBoxEl.dataset.enhanced = "true";
+  comboBoxEl.setAttribute("tabindex", "-1");
 };
 
 /**
@@ -515,6 +522,8 @@ const displayList = (el) => {
   noResults.setAttribute("class", `${LIST_OPTION_CLASS}--no-results`);
   noResults.textContent = "No results found";
 
+  comboBoxEl.classList.add(COMBO_BOX_LIST_OPEN_CLASS);
+
   listEl.hidden = false;
 
   if (numOptions) {
@@ -554,7 +563,9 @@ const displayList = (el) => {
  * @param {HTMLElement} el An element within the combo box component
  */
 const hideList = (el) => {
-  const { inputEl, listEl, statusEl, focusedOptionEl } = getComboBoxContext(el);
+  const { comboBoxEl, inputEl, listEl, statusEl, focusedOptionEl } = getComboBoxContext(el);
+
+  comboBoxEl.classList.remove(COMBO_BOX_LIST_OPEN_CLASS);
 
   statusEl.innerHTML = "";
 
@@ -577,11 +588,14 @@ const hideList = (el) => {
 const selectItem = (listOptionEl) => {
   const { comboBoxEl, selectEl, inputEl } = getComboBoxContext(listOptionEl);
 
+  ARROW_KEYS_DISABLED = true;
+
   changeElementValue(selectEl, listOptionEl.dataset.value);
   changeElementValue(inputEl, listOptionEl.textContent);
   comboBoxEl.classList.add(COMBO_BOX_PRISTINE_CLASS);
   hideList(comboBoxEl);
-  inputEl.focus();
+  // inputEl.focus();
+  comboBoxEl.focus();
 };
 
 /**
@@ -671,7 +685,9 @@ const handleEscape = (event) => {
 
   hideList(comboBoxEl);
   resetSelection(comboBoxEl);
-  inputEl.focus();
+  forceCursorToFront(comboBoxEl,'handleEscape');
+  // inputEl.focus();
+  comboBoxEl.focus();
 };
 
 /**
@@ -712,7 +728,24 @@ const handleEnterFromInput = (event) => {
     hideList(comboBoxEl);
   }
 
+  forceCursorToFront(comboBoxEl,'handleEnterFromInput');
+
+  comboBoxEl.focus();
+
   event.preventDefault();
+};
+
+/**
+ * Handle the enter event from an input element within the combo box component.
+ *
+ * @param {KeyboardEvent} event An event within the combo box component
+ */
+const handleBackspaceFromInput = (event) => {
+  const { clearInputBtnEl, inputEl } = getComboBoxContext(event.target);
+
+  if (!inputEl.selectionStart && ARROW_KEYS_DISABLED) {
+    clearInput(clearInputBtnEl);
+  }
 };
 
 /**
@@ -802,11 +835,13 @@ const toggleList = (el) => {
 
   if (listEl.hidden) {
     displayList(comboBoxEl);
+    inputEl.focus();
   } else {
     hideList(comboBoxEl);
+    comboBoxEl.focus();
   }
 
-  inputEl.focus();
+  // inputEl.focus();
 };
 
 /**
@@ -817,10 +852,98 @@ const toggleList = (el) => {
 const handleClickFromInput = (el) => {
   const { comboBoxEl, listEl } = getComboBoxContext(el);
 
+  if (ARROW_KEYS_DISABLED) {
+    forceCursorToFront(comboBoxEl, 'handleClickFromInput');
+  }
+
   if (listEl.hidden) {
     displayList(comboBoxEl);
   }
 };
+
+/**
+ * Force the input cursor to the front
+ *
+ * @param {HTMLInputElement} el An element within the combo box component
+ */
+const forceCursorToFront = (el, test) => {
+  const { inputEl } = getComboBoxContext(el);
+
+  if (test) console.log(test);
+
+  const activeElement = document.activeElement;
+  
+  inputEl.setSelectionRange(0, 0);
+
+  activeElement.focus();
+
+  ARROW_KEYS_DISABLED = true;
+  LAST_CURSOR_POSITION = 0;
+}
+
+/**
+ * Handle left right arrow
+ *
+ * @param {KeyboardEvent} event An event within the combo box component
+ */
+const handleXArrowsPress = (event) => {
+  if (ARROW_KEYS_DISABLED) {
+    event.preventDefault();
+    return false;
+  } 
+  // } else if (event.type=='keyup') {
+  //   LAST_CURSOR_POSITION = event.target.selectionStart;
+  // }
+};
+
+/**
+ * Handle key press from options list
+ *
+ * @param {KeyboardEvent} event An event within the combo box component
+ * @param {HTMLElement} el An element within the combo box component
+ */
+const handleSearchFromList = (event, el) => {
+  const { inputEl } = getComboBoxContext(el);
+  const key = event.key;
+
+  event.preventDefault();
+
+  if (!LAST_CURSOR_POSITION && ARROW_KEYS_DISABLED ) {
+    inputEl.value = "";
+  }
+
+  ARROW_KEYS_DISABLED = false;
+  
+  inputEl.setAttribute("aria-activedescendant", "");
+  inputEl.focus();
+
+  setTimeout(() => {
+    const currentValue = inputEl.value;
+
+    let newValue = '';
+
+    if (key == 'Backspace' && LAST_CURSOR_POSITION > 0) {
+      newValue = currentValue.slice(0, LAST_CURSOR_POSITION - 1) + currentValue.slice(LAST_CURSOR_POSITION);
+      LAST_CURSOR_POSITION -= 1;
+    } else {
+      newValue = currentValue.slice(0, LAST_CURSOR_POSITION) + key + currentValue.slice(LAST_CURSOR_POSITION);
+      LAST_CURSOR_POSITION += 1;
+    }
+
+    // inputEl.value = newValue;
+    changeElementValue(inputEl, newValue);
+
+    const event = new CustomEvent("input", {
+      bubbles: true,
+      cancelable: true,
+      detail: { newValue },
+    });
+    inputEl.dispatchEvent(event);
+
+    inputEl.setSelectionRange(LAST_CURSOR_POSITION, LAST_CURSOR_POSITION);
+  }, 0);
+};
+
 
 const comboBox = behavior(
   {
@@ -842,6 +965,14 @@ const comboBox = behavior(
         clearInput(this);
       },
     },
+    focusin: {
+      [INPUT]() {
+        if( ARROW_KEYS_DISABLED )
+        {
+          forceCursorToFront(this, 'focusin INPUT');
+        }
+      },
+    },
     focusout: {
       [COMBO_BOX](event) {
         if (!this.contains(event.relatedTarget)) {
@@ -849,24 +980,78 @@ const comboBox = behavior(
           hideList(this);
         }
       },
+      [INPUT]() {
+        LAST_CURSOR_POSITION = this.selectionStart;
+      }
     },
     keydown: {
       [COMBO_BOX]: keymap({
         Escape: handleEscape,
       }),
+      [INPUT](event) {
+        let keyMapObj = {
+          Enter: handleEnterFromInput,
+          Backspace: handleBackspaceFromInput,
+          ArrowLeft : handleXArrowsPress,
+          ArrowRight : handleXArrowsPress,
+          ArrowDown: handleDownFromInput,
+          Down: handleDownFromInput,
+        };
+
+        let keyBlockerFound = META_KEYS.indexOf( event.key ) > -1;
+
+        for (let key in keyMapObj) {
+          if (keyMapObj.hasOwnProperty(key) && event.key == key && !keyBlockerFound) {
+            keyBlockerFound = true;
+          }
+        }
+
+        if( META_KEYS.indexOf(event.key) == -1 && !keyBlockerFound ) {
+        // if (/^[\x20-\x7E]$/.test(event.key)) {
+            if( !this.selectionStart && ARROW_KEYS_DISABLED ) this.value = '';
+            
+            ARROW_KEYS_DISABLED = false;
+        }
+
+        const keyMap = keymap(keyMapObj);
+  
+        keyMap(event);
+      },
+      [LIST_OPTION](event) {
+
+        const keyMapObj = {
+          ArrowUp: handleUpFromListOption,
+          Up: handleUpFromListOption,
+          ArrowDown: handleDownFromListOption,
+          Down: handleDownFromListOption,
+          Enter: handleEnterFromListOption,
+          " ": handleSpaceFromListOption,
+          "Shift+Tab": noop,
+        }
+
+        let keyBlockerFound = META_KEYS.indexOf( event.key ) > -1;
+
+        for (let key in keyMapObj) {
+          if (keyMapObj.hasOwnProperty(key) && event.key == key && !keyBlockerFound) {
+            keyBlockerFound = true;
+          }
+        }
+
+        if (!keyBlockerFound) {
+          handleSearchFromList( event, this );
+
+          return;
+        }
+        
+        const keyMap = keymap(keyMapObj);
+  
+        keyMap(event);
+      },
+    },
+    keyup: {
       [INPUT]: keymap({
-        Enter: handleEnterFromInput,
-        ArrowDown: handleDownFromInput,
-        Down: handleDownFromInput,
-      }),
-      [LIST_OPTION]: keymap({
-        ArrowUp: handleUpFromListOption,
-        Up: handleUpFromListOption,
-        ArrowDown: handleDownFromListOption,
-        Down: handleDownFromListOption,
-        Enter: handleEnterFromListOption,
-        " ": handleSpaceFromListOption,
-        "Shift+Tab": noop,
+        ArrowLeft: handleXArrowsPress,
+        ArrowRight: handleXArrowsPress,
       }),
     },
     input: {
@@ -879,6 +1064,18 @@ const comboBox = behavior(
     mouseover: {
       [LIST_OPTION]() {
         handleMouseover(this);
+      },
+    },
+    mousedown: {
+      [INPUT](event) {
+        if( ARROW_KEYS_DISABLED )
+        {
+          event.preventDefault();
+
+          this.setSelectionRange(0,0);
+          
+          this.focus();
+        }
       },
     },
   },
